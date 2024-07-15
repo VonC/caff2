@@ -7,8 +7,7 @@ import os
 import threading 
 import msvcrt
 
-os.getcwd()
-os.chdir(r'%USERPROFILE%\OneDrive - Example Organization\Desktop')
+
 
 ## Failsafe -- prevent script from stopping once mouse moves to screen corner 
 pyautogui.FAILSAFE = False 
