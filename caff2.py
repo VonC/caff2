@@ -72,26 +72,48 @@ def create_icon_image():
         if app_state == AppState.RUNNING_INDEFINITE:
             square_color = "blue"
             circle_color = "white"
+            outline_color = None  # No outline
         elif app_state == AppState.RUNNING_TIMED:
             square_color = "blue"
             circle_color = "yellow"
+            outline_color = "red"  # Red outline for better contrast
         elif app_state == AppState.PAUSED_INDEFINITE:
             square_color = "red"
             circle_color = "yellow"
+            outline_color = None
         elif app_state == AppState.PAUSED_TIMED:
             square_color = "yellow"
             circle_color = "red"
+            outline_color = None
         else:
             square_color = "gray"
             circle_color = "white"
+            outline_color = None
 
         # Draw square background
         dc.rectangle([(0, 0), (size, size)], fill=square_color)
 
-        # Draw circle
-        dc.ellipse(
-            [(size // 4, size // 4), (3 * size // 4, 3 * size // 4)], fill=circle_color
-        )
+        # Calculate circle dimensions
+        circle_outer = [(size // 4, size // 4), (3 * size // 4, 3 * size // 4)]
+
+        # Draw outline if needed (slightly larger than the main circle)
+        if outline_color:
+            # Make outline slightly larger than the inner circle
+            outline_padding = 3
+            outline_outer = [
+                (
+                    circle_outer[0][0] - outline_padding,
+                    circle_outer[0][1] - outline_padding,
+                ),
+                (
+                    circle_outer[1][0] + outline_padding,
+                    circle_outer[1][1] + outline_padding,
+                ),
+            ]
+            dc.ellipse(outline_outer, fill=outline_color)
+
+        # Draw main circle
+        dc.ellipse(circle_outer, fill=circle_color)
 
         # Save to a temporary file
         icon_path = os.path.join(
