@@ -267,6 +267,26 @@ def random_mouse_move():
         return current_x, current_y  # Return original position in case of error
 
 
+def resume_callback(systray):
+    """Callback for resume menu item"""
+    global app_state
+
+    # Only do something if we're in a paused state
+    if app_state == AppState.PAUSED_INDEFINITE or app_state == AppState.PAUSED_TIMED:
+        set_app_state(AppState.RUNNING_INDEFINITE)
+        # Trigger an immediate action to confirm it's working
+        threading.Thread(target=perform_immediate_action, daemon=True).start()
+
+
+def perform_immediate_action():
+    """Perform an immediate action to confirm resume is working"""
+    time.sleep(0.5)  # Brief delay to allow state change to complete
+    x, y = random_mouse_move()
+    if x is not None and y is not None:
+        action_details = f"Resume action performed at coordinates ({x:.2f}, {y:.2f})"
+        log_action(action_details)
+
+
 def log_action(action_deets):
     """Log an action to the log file"""
     try:
@@ -349,6 +369,10 @@ def set_app_state(new_state, duration_minutes=None):
     """Set application state and update icon"""
     global app_state, state_end_time, systray_icon
 
+    # Record previous state for logging
+    previous_state = app_state
+
+    # Set new state
     app_state = new_state
 
     # Set end time if duration provided
@@ -363,14 +387,19 @@ def set_app_state(new_state, duration_minutes=None):
             new_icon = create_icon_image()
             if new_icon:
                 systray_icon.update(icon=new_icon)
-                log_action(f"Updated icon to {app_state.name}")
+                log_action(
+                    f"Updated icon from {previous_state.name} to {app_state.name}"
+                )
         except Exception as e:
             log_action(f"Error updating icon: {e}")
 
-    log_action(
-        f"State changed to {app_state.name}"
-        + (f" for {duration_minutes} minutes" if duration_minutes else "")
-    )
+    state_change_msg = f"State changed from {previous_state.name} to {app_state.name}"
+    if duration_minutes:
+        state_change_msg += (
+            f" for {duration_minutes} minutes (until {format_datetime(state_end_time)})"
+        )
+
+    log_action(state_change_msg)
 
 
 def background_task(minutes):
@@ -380,12 +409,20 @@ def background_task(minutes):
     log_action(f"Background task started - interval: {minutes} minutes")
 
     try:
+        last_check_time = datetime.now()
+
         while not stop_flag:
-            # Wait for specified minutes, checking stop flag every second
-            for _ in range(minutes * 60):
-                if stop_flag:
-                    break
-                time.sleep(1)
+            current_time = datetime.now()
+            elapsed_seconds = (current_time - last_check_time).total_seconds()
+
+            # Only wait for the remaining time in the current interval
+            if elapsed_seconds < minutes * 60:
+                # Wait for a short time and check again
+                time.sleep(min(1, minutes * 60 - elapsed_seconds))
+                continue
+
+            # Time for an action, reset the timer
+            last_check_time = current_time
 
             if not stop_flag:
                 # Only perform action if not paused
@@ -399,6 +436,8 @@ def background_task(minutes):
                             f"Action performed at coordinates ({x:.2f}, {y:.2f})"
                         )
                         log_action(action_details)
+                else:
+                    log_action(f"Action skipped - currently in {app_state.name} state")
     except Exception as e:
         error_msg = f"Error in background task: {str(e)}"
         log_action(error_msg)
