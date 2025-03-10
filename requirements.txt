@@ -1,4 +1,4 @@
 pyautogui
 psutil
-pystray
+infi.systray
 pillow

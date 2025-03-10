@@ -9,6 +9,9 @@ import msvcrt
 import psutil
 import configparser
 import traceback
+import tempfile
+import ctypes
+from infi.systray import SysTrayIcon
 from PIL import Image, ImageDraw
 
 ## Failsafe -- prevent script from stopping once mouse moves to screen corner
@@ -19,6 +22,23 @@ global last_action_time
 last_action_time = None
 global stop_flag
 stop_flag = False
+global systray_icon
+systray_icon = None
+
+# For hiding console window
+kernel32 = ctypes.WinDLL("kernel32")
+user32 = ctypes.WinDLL("user32")
+SW_HIDE = 0
+
+
+def hide_console():
+    """Hide the console window"""
+    try:
+        hwnd = kernel32.GetConsoleWindow()
+        if hwnd:
+            user32.ShowWindow(hwnd, SW_HIDE)
+    except Exception as e:
+        print(f"Error hiding console: {e}")
 
 
 def create_icon_image(color="blue", size=64):
@@ -30,11 +50,14 @@ def create_icon_image(color="blue", size=64):
         dc.ellipse(
             [(size // 4, size // 4), (3 * size // 4, 3 * size // 4)], fill="white"
         )
-        return image
+
+        # Save to a temporary file
+        icon_path = os.path.join(tempfile.gettempdir(), "mouse_mover_icon.ico")
+        image.save(icon_path, format="ICO")
+        return icon_path
     except Exception as e:
         print(f"Error creating icon image: {e}")
-        # Return a simple default image
-        return Image.new("RGB", (16, 16), color=color)
+        return None  # Return None in case of error
 
 
 def is_already_running():
@@ -145,7 +168,7 @@ def random_mouse_move():
 
         return new_x, new_y
     except Exception as e:
-        print(f"Error during mouse movement: {e}")
+        log_action(f"Error during mouse movement: {e}")
         return current_x, current_y  # Return original position in case of error
 
 
@@ -158,12 +181,38 @@ def log_action(action_deets):
         print(f"Error writing to log file: {e}")
 
 
+def get_tooltip_text(minutes):
+    """Get tooltip text for system tray icon"""
+    global last_action_time
+    if last_action_time is None:
+        return f"Mouse Mover - Moving every {minutes} minutes"
+
+    time_diff = datetime.now() - last_action_time
+    minutes_diff = time_diff.total_seconds() // 60
+    seconds_diff = int(time_diff.total_seconds() % 60)
+
+    return f"Last movement: {minutes_diff}m {seconds_diff}s ago"
+
+
+def update_tooltip(systray, minutes):
+    """Update the tooltip periodically"""
+    global stop_flag, systray_icon
+    while not stop_flag:
+        try:
+            if systray_icon:
+                tooltip = get_tooltip_text(minutes)
+                systray_icon.update(hover_text=tooltip)
+        except Exception as e:
+            log_action(f"Error updating tooltip: {e}")
+        time.sleep(1)
+
+
 def background_task(minutes):
     """The main task that runs in the background"""
     global last_action_time
     global stop_flag
 
-    print(f"Background task started - moving mouse every {minutes} minutes")
+    log_action(f"Background task started - moving mouse every {minutes} minutes")
 
     try:
         while not stop_flag:
@@ -177,38 +226,24 @@ def background_task(minutes):
                 x, y = random_mouse_move()
                 action_details = f"Mouse was moved to ({x:.2f}, {y:.2f})"
                 log_action(action_details)
-                print(f"Action performed at {datetime.now()}. {action_details}")
-
     except Exception as e:
         error_msg = f"Error in background task: {str(e)}"
         log_action(error_msg)
-        print(error_msg)
-        traceback.print_exc()
     finally:
-        print("Background task ended")
+        log_action("Background task ended")
 
 
-def key_monitor():
-    """Monitor for ESC key press to exit the program"""
+def exit_app(systray):
+    """Exit the application"""
     global stop_flag
-    print("Press ESC to exit")
-
-    try:
-        while not stop_flag:
-            if msvcrt.kbhit():
-                key = msvcrt.getch()
-                if key == b"\x1b":  # ESC key
-                    print("ESC pressed, exiting...")
-                    stop_flag = True
-            time.sleep(0.1)
-    except Exception as e:
-        print(f"Error in key monitor: {e}")
-        stop_flag = True  # Trigger exit on error
+    stop_flag = True
+    log_action("Exiting application via system tray")
+    os._exit(0)
 
 
 def main():
     """Main function"""
-    global stop_flag
+    global stop_flag, systray_icon
 
     try:
         # Check if already running and handle command-line arg
@@ -233,7 +268,14 @@ def main():
                 minutes = min_num()
                 write_config(minutes)
 
-        print(f"Mouse mover will move every {minutes} minutes")
+        # Create icon for system tray
+        icon_path = (
+            create_icon_image() or "mouse_mover_icon.ico"
+        )  # Default if creation fails
+
+        # Create system tray icon with menu
+        menu_options = (("Exit", None, exit_app),)
+        tooltip = f"Mouse Mover - Moving every {minutes} minutes"
 
         # Start the background task
         bg_thread = threading.Thread(
@@ -241,25 +283,25 @@ def main():
         )
         bg_thread.start()
 
-        # Start the key monitor
-        key_thread = threading.Thread(target=key_monitor, daemon=True)
-        key_thread.start()
+        # Create the system tray icon
+        systray_icon = SysTrayIcon(icon_path, tooltip, menu_options)
 
-        # Keep the main thread running until stop flag is set
-        try:
-            while not stop_flag:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("\nInterrupted by user")
-            stop_flag = True
+        # Start tooltip updater thread
+        tooltip_thread = threading.Thread(
+            target=update_tooltip, args=(systray_icon, minutes), daemon=True
+        )
+        tooltip_thread.start()
+
+        # Hide console window after setup is complete
+        hide_console()
+
+        # Start the system tray (this will block until exit)
+        systray_icon.start()
 
     except Exception as e:
-        print(f"Error in main function: {e}")
+        log_action(f"Error in main function: {e}")
         traceback.print_exc()
-    finally:
-        print("Exiting Mouse Mover")
-        # Ensure we exit even if threads are still running
-        os._exit(0)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
