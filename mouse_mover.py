@@ -11,6 +11,7 @@ import configparser
 import traceback
 import tempfile
 import ctypes
+import subprocess
 from infi.systray import SysTrayIcon
 from PIL import Image, ImageDraw
 
@@ -74,7 +75,9 @@ def is_already_running():
                 try:
                     cmdline = process.cmdline()
                     if len(cmdline) > 1 and current_process_name in cmdline[1]:
-                        return True
+                        # Check if the argument list contains our special "background" flag
+                        if "--caff2-worker" not in cmdline:
+                            return True
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
         return False
@@ -117,13 +120,17 @@ def write_config(minutes):
 
 def get_minutes_from_args():
     """Get minutes from command line arguments"""
-    if len(sys.argv) >= 2:
-        try:
-            minutes = int(sys.argv[1])
-            if minutes >= 1:
-                return minutes
-        except ValueError:
-            pass
+    for i, arg in enumerate(sys.argv):
+        if arg == "--caff2-worker":
+            continue
+
+        if i >= 1:  # Skip script name
+            try:
+                minutes = int(arg)
+                if minutes >= 1:
+                    return minutes
+            except ValueError:
+                pass
     return None
 
 
@@ -168,7 +175,7 @@ def random_mouse_move():
 
         return new_x, new_y
     except Exception as e:
-        log_action(f"Error during mouse movement: {e}")
+        log_action(f"Error during action: {e}")
         return current_x, current_y  # Return original position in case of error
 
 
@@ -184,17 +191,19 @@ def log_action(action_deets):
 def get_tooltip_text(minutes):
     """Get tooltip text for system tray icon"""
     global last_action_time
+    base_text = f"Caff2: every {minutes} minutes"
+
     if last_action_time is None:
-        return f"Mouse Mover - Moving every {minutes} minutes"
+        return base_text
 
     time_diff = datetime.now() - last_action_time
     minutes_diff = time_diff.total_seconds() // 60
     seconds_diff = int(time_diff.total_seconds() % 60)
 
-    return f"Last movement: {minutes_diff}m {seconds_diff}s ago"
+    return f"{base_text} | Last action: {minutes_diff}m {seconds_diff}s ago"
 
 
-def update_tooltip(systray, minutes):
+def update_tooltip(minutes):
     """Update the tooltip periodically"""
     global stop_flag, systray_icon
     while not stop_flag:
@@ -212,7 +221,7 @@ def background_task(minutes):
     global last_action_time
     global stop_flag
 
-    log_action(f"Background task started - moving mouse every {minutes} minutes")
+    log_action(f"Background task started - interval: {minutes} minutes")
 
     try:
         while not stop_flag:
@@ -224,7 +233,7 @@ def background_task(minutes):
 
             if not stop_flag:
                 x, y = random_mouse_move()
-                action_details = f"Mouse was moved to ({x:.2f}, {y:.2f})"
+                action_details = f"Action performed at coordinates ({x:.2f}, {y:.2f})"
                 log_action(action_details)
     except Exception as e:
         error_msg = f"Error in background task: {str(e)}"
@@ -241,11 +250,59 @@ def exit_app(systray):
     os._exit(0)
 
 
-def main():
-    """Main function"""
+def worker_process(minutes):
+    """Function for the actual background worker process"""
     global stop_flag, systray_icon
 
     try:
+        # Create icon for system tray
+        icon_path = (
+            create_icon_image() or "mouse_mover_icon.ico"
+        )  # Default if creation fails
+
+        # Create system tray icon with menu
+        menu_options = (("Exit", None, exit_app),)
+        tooltip = f"Caff2: every {minutes} minutes"
+
+        # Create the system tray icon
+        systray_icon = SysTrayIcon(icon_path, tooltip, menu_options)
+
+        # Start the background task in a separate thread
+        bg_thread = threading.Thread(
+            target=background_task, args=(minutes,), daemon=True
+        )
+        bg_thread.start()
+
+        # Start tooltip updater thread
+        tooltip_thread = threading.Thread(
+            target=update_tooltip, args=(minutes,), daemon=True
+        )
+        tooltip_thread.start()
+
+        # Hide console window
+        hide_console()
+
+        # Run the system tray (this will block until exit)
+        systray_icon.start()
+
+    except Exception as e:
+        log_action(f"Error in worker process: {str(e)}")
+        traceback.print_exc()
+
+
+def main():
+    """Main function"""
+    try:
+        # Check if this is the worker process
+        if "--caff2-worker" in sys.argv:
+            # This is the worker process, run the actual application
+            minutes = read_config()
+            if not minutes:
+                log_action("No minutes configuration found for worker process")
+                return
+            worker_process(minutes)
+            return
+
         # Check if already running and handle command-line arg
         arg_minutes = get_minutes_from_args()
         if arg_minutes is not None:
@@ -268,40 +325,18 @@ def main():
                 minutes = min_num()
                 write_config(minutes)
 
-        # Create icon for system tray
-        icon_path = (
-            create_icon_image() or "mouse_mover_icon.ico"
-        )  # Default if creation fails
-
-        # Create system tray icon with menu
-        menu_options = (("Exit", None, exit_app),)
-        tooltip = f"Mouse Mover - Moving every {minutes} minutes"
-
-        # Start the background task
-        bg_thread = threading.Thread(
-            target=background_task, args=(minutes,), daemon=True
+        # Launch the worker process
+        script_path = os.path.abspath(sys.argv[0])
+        subprocess.Popen(
+            [sys.executable, script_path, "--caff2-worker"],
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
-        bg_thread.start()
 
-        # Create the system tray icon
-        systray_icon = SysTrayIcon(icon_path, tooltip, menu_options)
-
-        # Start tooltip updater thread
-        tooltip_thread = threading.Thread(
-            target=update_tooltip, args=(systray_icon, minutes), daemon=True
-        )
-        tooltip_thread.start()
-
-        # Hide console window after setup is complete
-        hide_console()
-
-        # Start the system tray (this will block until exit)
-        systray_icon.start()
+        print(f"Caff2 started in background (every {minutes} minutes)")
 
     except Exception as e:
-        log_action(f"Error in main function: {e}")
+        print(f"Error starting Caff2: {e}")
         traceback.print_exc()
-        sys.exit(1)
 
 
 if __name__ == "__main__":
