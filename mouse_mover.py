@@ -1,18 +1,40 @@
-import pyautogui  # for controlling mouse and keyboard
+import pyautogui
 import time
-import sys  # access command line arguments
+import sys
 from datetime import datetime
 import random
 import os
 import threading
 import msvcrt
-import psutil  # for checking running processes
-import configparser  # for handling ini file
+import psutil
+import configparser
+from pystray import (
+    Icon as SysTrayIcon,
+    Menu as SysTrayMenu,
+    MenuItem as SysTrayMenuItem,
+)
+from PIL import Image, ImageDraw
+import tempfile
 
 ## Failsafe -- prevent script from stopping once mouse moves to screen corner
 pyautogui.FAILSAFE = False
 
 CONFIG_FILE = "caff2.ini"
+global last_action_time
+last_action_time = None
+global icon
+icon = None
+
+
+def create_icon_image(color="blue", size=64):
+    """Create an icon image for the system tray"""
+    image = Image.new("RGB", (size, size), color="white")
+    dc = ImageDraw.Draw(image)
+    dc.rectangle([(0, 0), (size, size)], fill=color)
+
+    # Draw mouse icon (simplified)
+    dc.ellipse([(size // 4, size // 4), (3 * size // 4, 3 * size // 4)], fill="white")
+    return image
 
 
 def is_already_running():
@@ -71,21 +93,19 @@ def get_minutes_from_args():
     return None
 
 
-## Get durations from user:
 def min_num():
     while True:
         try:
             numMin = int(input("Enter number of minutes to wait between actions: "))
             if numMin < 1:
                 print("Has to be more than 1")
-                raise ValueError  # has to be more than 1 min
+                raise ValueError
             print(f"chosen duration: {numMin}")
             return numMin
         except ValueError:
             print("Please enter an integer (e.g. not a string)")
 
 
-## Random mouse movement
 def random_mouse_move():
     # Get current mouse position
     current_x, current_y = pyautogui.position()
@@ -104,32 +124,64 @@ def random_mouse_move():
     for _ in range(3):
         pyautogui.press("shift")
 
+    global last_action_time
+    last_action_time = datetime.now()
+
     return new_x, new_y
 
 
-## Logging actions onto text file:
+def get_status_text():
+    """Get status text for the tray icon tooltip"""
+    global last_action_time
+    if last_action_time is None:
+        return "Mouse mover running - no movements yet"
+
+    time_since = datetime.now() - last_action_time
+    minutes = time_since.seconds // 60
+    seconds = time_since.seconds % 60
+
+    return f"Last movement: {minutes}m {seconds}s ago"
+
+
 def log_action(action_deets):
-    with open("mouse_moving_log.txt", "a") as log_file:  # a for append mode
+    with open("mouse_moving_log.txt", "a") as log_file:
         log_file.write(f"{datetime.now()}: {action_deets}\n")
 
 
-## Stopping the program
-def stop_mechanism():
-    global stop_thread  # global variable outside of the function (top level of script)
+def exit_action(icon):
+    """Exit the application when selected from the tray menu"""
+    icon.stop()
+    os._exit(0)  # Force exit
+
+
+def update_tooltip():
+    """Update the tray icon tooltip with status information"""
+    global icon
     while True:
-        if msvcrt.kbhit():
-            char = msvcrt.getch()
-            if char == b"\x1b":  # this is for escape key
-                print("\nStopping mousemover")
-                stop_thread = True
-                break
-        time.sleep(0.5)
+        if icon:
+            icon.title = get_status_text()
+        time.sleep(1)
+
+
+def background_task(minutes):
+    """The main task that runs in the background"""
+    global last_action_time
+
+    try:
+        while True:
+            # Wait for specified minutes
+            time.sleep(minutes * 60)
+
+            # Perform mouse movement
+            x, y = random_mouse_move()
+            action_details = f"Mouse was moved to ({x:.2f}, {y:.2f})"
+            log_action(action_details)
+
+    except Exception as e:
+        log_action(f"Error in background task: {str(e)}")
 
 
 def main():
-    global stop_thread
-    stop_thread = False
-
     # Check if already running and handle command-line arg
     arg_minutes = get_minutes_from_args()
     if arg_minutes is not None:
@@ -150,46 +202,20 @@ def main():
             minutes = min_num()
             write_config(minutes)
 
-    # Starting the stop mechanism in a separate thread
-    stop_threading = threading.Thread(target=stop_mechanism)
-    stop_threading.daemon = True  # Ensure thread terminates when main program exits
-    stop_threading.start()
+    # Create and configure the system tray icon
+    image = create_icon_image()
+    menu = SysTrayMenu(SysTrayMenuItem("Exit", exit_action))
 
-    # Record the start time
-    start_time = datetime.now()
+    # Start the background task
+    threading.Thread(target=background_task, args=(minutes,), daemon=True).start()
 
-    try:
-        print(
-            f"Mouse mover running. Will move every {minutes} minutes. Press ESC to stop."
-        )
+    # Start the tooltip updater
+    threading.Thread(target=update_tooltip, daemon=True).start()
 
-        while not stop_thread:
-            print(f"Waiting for {minutes} minutes...")
-
-            # Wait for specified minutes, checking stop flag every second
-            for _ in range(minutes * 60):
-                if stop_thread:
-                    break
-                time.sleep(1)
-
-            if not stop_thread:
-                x, y = random_mouse_move()
-                action_details = f"Mouse was moved to ({x:.2f}, {y:.2f})"
-                log_action(action_details)
-                print(f"Action logged at {datetime.now()}. Details: {action_details}")
-
-    except KeyboardInterrupt:
-        print("Program interrupted manually.")
-
-    finally:
-        # Calculate total runtime
-        end_time = datetime.now()
-        total_runtime = end_time - start_time
-        print(f"Total runtime: {total_runtime}")
-
-        # Ensure all threads are cleaned up before exiting
-        stop_thread = True
-        print("Program has been stopped.")
+    # Run the system tray icon (this will block until the icon is stopped)
+    global icon
+    icon = SysTrayIcon(image, f"Mouse Mover (every {minutes} min)", menu)
+    icon.run()
 
 
 if __name__ == "__main__":
