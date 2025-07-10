@@ -1,3 +1,17 @@
+# Import essential modules first
+import os
+import sys
+import ctypes
+
+# Now we can check for worker process and hide the window immediately
+if __name__ == "__main__" and "--caff2-worker" in sys.argv:
+    # Hide console immediately using Windows API
+    kernel32 = ctypes.WinDLL("kernel32")
+    user32 = ctypes.WinDLL("user32")
+    hwnd = kernel32.GetConsoleWindow()
+    if hwnd:
+        user32.ShowWindow(hwnd, 0)  # SW_HIDE
+
 import pyautogui
 import time
 import sys
@@ -5,7 +19,6 @@ from datetime import datetime, timedelta
 import random
 import os
 import threading
-import msvcrt
 import psutil
 import configparser
 import traceback
@@ -130,26 +143,113 @@ def create_icon_image():
 def is_already_running():
     """Check if another instance of this script is already running"""
     try:
-        current_process = psutil.Process(os.getpid())
-        current_process_name = os.path.basename(__file__)
+        # Use the script directory for lock file instead of temp directory
+        lock_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "caff2.lock"
+        )
 
-        for process in psutil.process_iter(["pid", "name"]):
-            if (
-                process.info["pid"] != current_process.pid
-                and process.info["name"] == "python.exe"
-            ):
+        debug_log(f"Checking lock file: {lock_file}", "caff2_lock_debug.log")
+
+        # Check if lock file exists
+        if os.path.exists(lock_file):
+            debug_log("Lock file exists", "caff2_lock_debug.log")
+            # Read the PID from the lock file
+            try:
+                with open(lock_file, "r") as f:
+                    pid_str = f.read().strip()
+                    debug_log(f"Lock file content: {pid_str}", "caff2_lock_debug.log")
+                    pid = int(pid_str)
+
+                # Check if process with this PID is still running
                 try:
-                    cmdline = process.cmdline()
-                    if len(cmdline) > 1 and current_process_name in cmdline[1]:
-                        # Check if the argument list contains our special "background" flag
-                        if "--caff2-worker" not in cmdline:
-                            return True
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
+                    # If process exists and is a Python process, consider app running
+                    process = psutil.Process(pid)
+                    debug_log(
+                        f"Process exists. Name={process.name()}", "caff2_lock_debug.log"
+                    )
+                    if process.name() in ["python.exe", "python"]:
+                        debug_log(
+                            "Process is Python. App is already running.",
+                            "caff2_lock_debug.log",
+                        )
+                        return True
+                    else:
+                        debug_log(
+                            "Process is not Python. Removing stale lock.",
+                            "caff2_lock_debug.log",
+                        )
+                        os.remove(lock_file)
+                except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                    # Process no longer exists, lock file is stale
+                    debug_log(
+                        f"Process doesn't exist: {e}. Removing stale lock.",
+                        "caff2_lock_debug.log",
+                    )
+                    os.remove(lock_file)
+            except Exception as e:
+                # Lock file exists but is invalid, remove it
+                debug_log(f"Invalid lock file: {e}. Removing.", "caff2_lock_debug.log")
+                os.remove(lock_file)
+
+        # If we get here, no valid lock exists
+        # Instead of immediately creating a lock file, check for running worker processes
+
+        current_pid = os.getpid()
+        current_process_name = os.path.basename(__file__)
+        debug_log(
+            f"Current process: PID={current_pid}, Name={current_process_name}",
+            "caff2_lock_debug.log",
+        )
+
+        # Count worker processes
+        worker_processes = []
+
+        for process in psutil.process_iter(["pid", "name", "cmdline"]):
+            try:
+                if process.info["pid"] != current_pid and process.info["name"] in [
+                    "python.exe",
+                    "python",
+                ]:
+                    cmdline = process.info["cmdline"]
+                    if cmdline and any(current_process_name in arg for arg in cmdline):
+                        # This is a process running our script
+                        is_worker = any("--caff2-worker" in arg for arg in cmdline)
+                        debug_log(
+                            f"Found process: PID={process.info['pid']}, worker={is_worker}",
+                            "caff2_lock_debug.log",
+                        )
+
+                        if is_worker:
+                            worker_processes.append(process.info["pid"])
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        debug_log(
+            f"Found {len(worker_processes)} worker processes: {worker_processes}",
+            "caff2_lock_debug.log",
+        )
+
+        # If there are already worker processes running, the app is already running
+        if len(worker_processes) > 0:
+            debug_log(
+                "Application is already running (worker processes found)",
+                "caff2_lock_debug.log",
+            )
+            return True
+
+        # If we get here, no instances are running
+        # Create the lock file with our PID
+        with open(lock_file, "w") as f:
+            f.write(str(os.getpid()))
+
+        debug_log(f"Created lock file with PID {os.getpid()}", "caff2_lock_debug.log")
         return False
+
     except Exception as e:
         print(f"Error checking for running instances: {e}")
-        return False  # Assume no other instance is running in case of error
+        debug_log(f"Error checking for running instances: {e}", "caff2_lock_debug.log")
+        traceback.print_exc()
+        return False
 
 
 def read_config():
@@ -439,8 +539,10 @@ def background_task(minutes):
 
             # Only wait for the remaining time in the current interval
             if elapsed_seconds < minutes * 60:
-                # Wait for a short time and check again
-                time.sleep(min(1, minutes * 60 - elapsed_seconds))
+                # Wait for a shorter time and check stop_flag more frequently
+                time.sleep(
+                    0.5
+                )  # Sleep for half a second at a time instead of up to a minute
                 continue
 
             # Time for an action, reset the timer
@@ -535,6 +637,19 @@ def exit_app(systray):
     global stop_flag
     stop_flag = True
     log_action("Exiting application via system tray")
+
+    # Remove lock file - now using script directory
+    try:
+        lock_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "caff2.lock"
+        )
+        debug_log(f"Removing lock file: {lock_file}", "caff2_exit.log")
+        if os.path.exists(lock_file):
+            os.remove(lock_file)
+            debug_log("Lock file removed successfully", "caff2_exit.log")
+    except Exception as e:
+        debug_log(f"Error removing lock file: {e}", "caff2_exit.log")
+
     os._exit(0)
 
 
@@ -572,96 +687,182 @@ def create_menu_options():
     return menu_options
 
 
+def debug_log(message, filename="caff2_debug.log"):
+    """Write to a debug log file with the specified filename"""
+    try:
+        log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+        with open(log_path, "a") as f:
+            f.write(f"{datetime.now()}: {message}\n")
+    except Exception as e:
+        # Use Windows temp file as fallback
+        try:
+            temp_log = os.path.join(tempfile.gettempdir(), "caff2_fallback_log.txt")
+            with open(temp_log, "a") as f:
+                f.write(f"{datetime.now()}: ERROR writing to {filename}: {e}\n")
+                f.write(f"{datetime.now()}: {message}\n")
+        except:
+            pass  # If even this fails, we can't do much more
+
+
 def worker_process(minutes):
     """Function for the actual background worker process"""
     global stop_flag, systray_icon, refresh_minutes
+
+    debug_log("Worker process starting", "caff2_worker.log")
+    debug_log(f"Process ID: {os.getpid()}", "caff2_worker.log")
+    debug_log(f"Minutes setting: {minutes}", "caff2_worker.log")
 
     refresh_minutes = minutes
 
     try:
         # Set initial state
         set_app_state(AppState.RUNNING_INDEFINITE)
+        debug_log("Set initial state to RUNNING_INDEFINITE", "caff2_worker.log")
 
         # Create icon for system tray
-        icon_path = create_icon_image() or "caff2_icon.ico"
+        icon_path = create_icon_image()
+        if not icon_path:
+            debug_log("Failed to create custom icon, using default", "caff2_worker.log")
+            icon_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "caff2_icon.ico"
+            )
+            if not os.path.exists(icon_path):
+                # Create a simple icon if needed
+                debug_log("Creating simple default icon", "caff2_worker.log")
+                from PIL import Image
+
+                img = Image.new("RGB", (64, 64), color="blue")
+                icon_path = os.path.join(tempfile.gettempdir(), "caff2_default.ico")
+                img.save(icon_path, format="ICO")
+
+        debug_log(f"Using icon at: {icon_path}", "caff2_worker.log")
 
         # Create system tray icon with menu
+        debug_log("Creating menu options", "caff2_worker.log")
         menu_options = create_menu_options()
         tooltip = get_tooltip_text(minutes)
 
-        # Create the system tray icon
-        systray_icon = SysTrayIcon(icon_path, tooltip, menu_options)
+        debug_log("Initializing system tray icon")
+        # Create the system tray icon with exception handling
+        try:
+            systray_icon = SysTrayIcon(icon_path, tooltip, menu_options)
+            debug_log("System tray icon created successfully", "caff2_worker.log")
+        except Exception as e:
+            debug_log(f"Error creating system tray icon: {e}", "caff2_worker.log")
+            traceback.print_exc()
+            raise  # Re-raise to be caught by outer try/except
 
         # Start the background task in a separate thread
+        debug_log("Starting background task thread", "caff2_worker.log")
         bg_thread = threading.Thread(
             target=background_task, args=(minutes,), daemon=True
         )
         bg_thread.start()
 
         # Start tooltip updater thread
+        debug_log("Starting tooltip updater thread", "caff2_worker.log")
         tooltip_thread = threading.Thread(
             target=update_tooltip, args=(minutes,), daemon=True
         )
         tooltip_thread.start()
 
         # Hide console window
+        debug_log("Hiding console window", "caff2_worker.log")
         hide_console()
 
         # Run the system tray (this will block until exit)
+        debug_log("Starting system tray (blocking call)", "caff2_worker.log")
         systray_icon.start()
+        debug_log("System tray exited normally")
 
     except Exception as e:
-        log_action(f"Error in worker process: {str(e)}")
+        error_msg = f"Error in worker process: {str(e)}"
+        debug_log(error_msg, "caff2_worker.log")
+        log_action(error_msg)
         traceback.print_exc()
+
+        # Try to show a visible error
+        try:
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(
+                0, f"Caff2 Error: {str(e)}", "Caff2 Error", 0
+            )
+        except:
+            pass
 
 
 def main():
     """Main function"""
     try:
-        # Check if this is the worker process
+        # Always check for running instances first
+        if "--caff2-worker" not in sys.argv:  # Only do this in the main process
+            print("Checking for existing instances...")
+            if is_already_running():
+                print("Another instance is already running. Exiting.")
+                sys.exit(2)
+
+        # This block handles worker process execution
         if "--caff2-worker" in sys.argv:
-            # This is the worker process, run the actual application
+            # Worker process code
             minutes = read_config()
             if not minutes:
+                debug_log("No minutes configuration found", "caff2_main.log")
                 log_action("No minutes configuration found for worker process")
                 return
             worker_process(minutes)
             return
 
-        # Check if already running and handle command-line arg
+        # Main process continues here
+        debug_log("Running as main process", "caff2_main.log")
+
+        # Handle minutes configuration
         arg_minutes = get_minutes_from_args()
         if arg_minutes is not None:
             write_config(arg_minutes)
-            if is_already_running():
-                print(
-                    "Another instance is already running. Updated config and exiting."
-                )
-                return
 
-        # Determine minutes to wait
-        minutes = None
+        minutes = arg_minutes if arg_minutes is not None else read_config()
+        if minutes is None:
+            minutes = min_num()
+            write_config(minutes)
 
-        # Priority: 1) Command line args, 2) Config file, 3) User input
-        if arg_minutes is not None:
-            minutes = arg_minutes
-        else:
-            minutes = read_config()
-            if minutes is None:
-                minutes = min_num()
-                write_config(minutes)
-
-        # Launch the worker process
+        # Launch the worker process with multiple invisibility techniques
         script_path = os.path.abspath(sys.argv[0])
-        subprocess.Popen(
+        debug_log(f"Launching worker process: {script_path}", "caff2_main.log")
+
+        # Create startupinfo to hide window
+        startupinfo = None
+        if os.name == "nt":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0  # SW_HIDE
+
+        # Use BOTH startupinfo AND creationflags for maximum invisibility
+        worker = subprocess.Popen(
             [sys.executable, script_path, "--caff2-worker"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            startupinfo=startupinfo,
             creationflags=subprocess.CREATE_NO_WINDOW,
+            close_fds=True,
+            start_new_session=True,
         )
 
+        debug_log(f"Worker process started with PID: {worker.pid}", "caff2_main.log")
         print(f"Caff2 started in background (every {minutes} minutes)")
+
+        # Exit main process
+        sys.exit(0)
 
     except Exception as e:
         print(f"Error starting Caff2: {e}")
+        try:
+            debug_log(f"Error in main: {e}", "caff2_main.log")
+        except:
+            pass
         traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == "__main__":
