@@ -191,9 +191,7 @@ def is_already_running():
                 debug_log(f"Invalid lock file: {e}. Removing.", "caff2_lock_debug.log")
                 os.remove(lock_file)
 
-        # If we get here, no valid lock exists
-        # Instead of immediately creating a lock file, check for running worker processes
-
+        # Count worker processes even if no lock file exists
         current_pid = os.getpid()
         current_process_name = os.path.basename(__file__)
         debug_log(
@@ -238,11 +236,7 @@ def is_already_running():
             return True
 
         # If we get here, no instances are running
-        # Create the lock file with our PID
-        with open(lock_file, "w") as f:
-            f.write(str(os.getpid()))
-
-        debug_log(f"Created lock file with PID {os.getpid()}", "caff2_lock_debug.log")
+        # The worker process will create its own lock file later
         return False
 
     except Exception as e:
@@ -711,6 +705,18 @@ def worker_process(minutes):
     debug_log("Worker process starting", "caff2_worker.log")
     debug_log(f"Process ID: {os.getpid()}", "caff2_worker.log")
     debug_log(f"Minutes setting: {minutes}", "caff2_worker.log")
+
+    # Create or update the lock file with the worker's PID
+    lock_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "caff2.lock")
+    try:
+        with open(lock_file, "w") as f:
+            f.write(str(os.getpid()))
+        debug_log(
+            f"Worker process updated lock file with its PID: {os.getpid()}",
+            "caff2_worker.log",
+        )
+    except Exception as e:
+        debug_log(f"Error updating lock file: {e}", "caff2_worker.log")
 
     refresh_minutes = minutes
 
