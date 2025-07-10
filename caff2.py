@@ -14,20 +14,19 @@ if __name__ == "__main__" and "--caff2-worker" in sys.argv:
 
 import pyautogui
 import time
-import sys
 from datetime import datetime, timedelta
 import random
-import os
 import threading
 import psutil
 import configparser
 import traceback
 import tempfile
-import ctypes
 import subprocess
 from infi.systray import SysTrayIcon
 from PIL import Image, ImageDraw
 from enum import Enum
+from typing import Callable, Optional, TypeAlias, Union
+from typing import Any  # 👈 Import Any for the alternative solution
 
 ## Failsafe -- prevent script from stopping once mouse moves to screen corner
 pyautogui.FAILSAFE = False
@@ -50,7 +49,7 @@ class AppState(Enum):
 
 
 global app_state
-app_state = AppState.RUNNING_INDEFINITE
+app_state: AppState = AppState.RUNNING_INDEFINITE
 global state_end_time
 state_end_time = None
 global refresh_minutes
@@ -200,9 +199,9 @@ def is_already_running():
         )
 
         # Count worker processes
-        worker_processes = []
+        worker_processes: list[psutil.Process] = []
 
-        for process in psutil.process_iter(["pid", "name", "cmdline"]):
+        for process in psutil.process_iter(["pid", "name", "cmdline"]):  # type: ignore
             try:
                 if process.info["pid"] != current_pid and process.info["name"] in [
                     "python.exe",
@@ -218,7 +217,7 @@ def is_already_running():
                         )
 
                         if is_worker:
-                            worker_processes.append(process.info["pid"])
+                            worker_processes.append(process.info["pid"])  # type: ignore
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
@@ -246,7 +245,7 @@ def is_already_running():
         return False
 
 
-def read_config():
+def read_config() -> Optional[int]:
     """Read configuration from ini file"""
     try:
         config = configparser.ConfigParser()
@@ -260,7 +259,7 @@ def read_config():
         return None
 
 
-def write_config(minutes):
+def write_config(minutes: Optional[int]):
     """Write configuration to ini file"""
     try:
         config = configparser.ConfigParser()
@@ -278,7 +277,7 @@ def write_config(minutes):
         print(f"Error writing config: {e}")
 
 
-def get_minutes_from_args():
+def get_minutes_from_args() -> Optional[int]:
     """Get minutes from command line arguments"""
     for i, arg in enumerate(sys.argv):
         if arg == "--caff2-worker":
@@ -310,7 +309,7 @@ def min_num():
             sys.exit(0)
 
 
-def format_time_duration(seconds):
+def format_time_duration(seconds: int) -> str:
     """Format time duration in a human-readable format"""
     if seconds < 60:
         return f"{seconds}s"
@@ -328,7 +327,7 @@ def format_time_duration(seconds):
         return f"{days}d {hours}h"
 
 
-def format_datetime(dt):
+def format_datetime(dt: datetime) -> str:
     """Format datetime in a minimal way"""
     now = datetime.now()
 
@@ -348,13 +347,16 @@ def format_datetime(dt):
     return dt.strftime("%d/%m/%y %H:%M:%S")
 
 
-def random_mouse_move():
+def random_mouse_move() -> tuple[Optional[float], Optional[float]]:
     """Perform random mouse movements and return new position"""
     global app_state
 
     # Don't move if paused
     if app_state == AppState.PAUSED_INDEFINITE or app_state == AppState.PAUSED_TIMED:
         return None, None
+
+    # Initialize variables to a default value before the try block
+    current_x, current_y = None, None
 
     try:
         # Get current mouse position
@@ -383,7 +385,7 @@ def random_mouse_move():
         return current_x, current_y  # Return original position in case of error
 
 
-def resume_callback(systray):
+def resume_callback(systray: Any):
     """Callback for resume menu item"""
     global app_state
 
@@ -399,11 +401,13 @@ def perform_immediate_action():
     time.sleep(0.5)  # Brief delay to allow state change to complete
     x, y = random_mouse_move()
     if x is not None and y is not None:
-        action_details = f"Resume action performed at coordinates ({x:.2f}, {y:.2f})"
+        action_details: str = (
+            f"Resume action performed at coordinates ({x:.2f}, {y:.2f})"
+        )
         log_action(action_details)
 
 
-def log_action(action_deets):
+def log_action(action_deets: str):
     """Log an action to the log file"""
     try:
         with open("caff2_log.txt", "a") as log_file:
@@ -412,11 +416,11 @@ def log_action(action_deets):
         print(f"Error writing to log file: {e}")
 
 
-def get_tooltip_text(minutes):
+def get_tooltip_text(minutes: Optional[int]) -> str:
     """Get tooltip text for system tray icon"""
     global app_state, state_end_time, last_action_time
 
-    lines = []
+    lines: list[str] = []
 
     # Line 1: Frequency
     lines.append(f"Refresh: every {minutes} minutes")
@@ -455,7 +459,7 @@ def get_tooltip_text(minutes):
     return "\n".join(lines)
 
 
-def update_tooltip(minutes):
+def update_tooltip(minutes: Optional[int]):
     """Update the tooltip periodically"""
     global stop_flag, systray_icon, app_state, state_end_time
 
@@ -481,7 +485,7 @@ def update_tooltip(minutes):
         time.sleep(1)
 
 
-def set_app_state(new_state, duration_minutes=None):
+def set_app_state(new_state: AppState, duration_minutes: Optional[int] = None):
     """Set application state and update icon"""
     global app_state, state_end_time, systray_icon
 
@@ -511,6 +515,9 @@ def set_app_state(new_state, duration_minutes=None):
 
     state_change_msg = f"State changed from {previous_state.name} to {app_state.name}"
     if duration_minutes:
+        # Assure the type checker that state_end_time is not None here
+        assert state_end_time is not None
+
         state_change_msg += (
             f" for {duration_minutes} minutes (until {format_datetime(state_end_time)})"
         )
@@ -518,9 +525,14 @@ def set_app_state(new_state, duration_minutes=None):
     log_action(state_change_msg)
 
 
-def background_task(minutes):
+def background_task(minutes: Optional[int]):
     """The main task that runs in the background"""
     global last_action_time, stop_flag, app_state
+
+    # Handle the case where the function is called without a valid interval.
+    if minutes is None:
+        log_action("Background task cannot start: no interval provided.")
+        return
 
     log_action(f"Background task started - interval: {minutes} minutes")
 
@@ -563,7 +575,7 @@ def background_task(minutes):
         log_action("Background task ended")
 
 
-def pause_callback(systray, duration=None):
+def pause_callback(systray: Any, duration: Optional[int] = None):
     """Callback for pause menu items"""
     if duration is None:
         # Custom duration
@@ -592,7 +604,7 @@ def pause_callback(systray, duration=None):
         set_app_state(AppState.PAUSED_TIMED, duration)
 
 
-def run_callback(systray, duration=None):
+def run_callback(systray: Any, duration: Optional[int] = None):
     """Callback for run menu items"""
     if duration is None:
         # Custom duration
@@ -621,12 +633,7 @@ def run_callback(systray, duration=None):
         set_app_state(AppState.RUNNING_TIMED, duration)
 
 
-def resume_callback(systray):
-    """Callback for resume menu item"""
-    set_app_state(AppState.RUNNING_INDEFINITE)
-
-
-def exit_app(systray):
+def exit_app(systray: Any):
     """Exit the application"""
     global stop_flag
     stop_flag = True
@@ -647,9 +654,24 @@ def exit_app(systray):
     os._exit(0)
 
 
-def create_menu_options():
+# Define type aliases for clarity and reusability
+# A callback function (like the lambdas) takes one argument and returns None
+MenuCallback: TypeAlias = Callable[[Any], None]
+
+# A submenu is a tuple of menu items, where each item has a callback
+SubMenu: TypeAlias = tuple[tuple[str, Optional[str], MenuCallback], ...]
+
+# An action can be either a direct callback or a submenu
+Action: TypeAlias = Union[MenuCallback, SubMenu]
+
+# The final menu options structure
+MenuOptions: TypeAlias = tuple[tuple[str, Optional[str], Action], ...]
+
+
+def create_menu_options() -> MenuOptions:
     """Create menu options for the system tray icon"""
-    pause_menu = (
+    # By adding the `: SubMenu` type hint, you fix the Pylance error
+    pause_menu: SubMenu = (
         ("5 minutes", None, lambda systray: pause_callback(systray, 5)),
         ("10 minutes", None, lambda systray: pause_callback(systray, 10)),
         ("15 minutes", None, lambda systray: pause_callback(systray, 15)),
@@ -660,7 +682,7 @@ def create_menu_options():
         ("Indefinite", None, lambda systray: pause_callback(systray, 0)),
     )
 
-    run_menu = (
+    run_menu: SubMenu = (
         ("5 minutes", None, lambda systray: run_callback(systray, 5)),
         ("10 minutes", None, lambda systray: run_callback(systray, 10)),
         ("15 minutes", None, lambda systray: run_callback(systray, 15)),
@@ -671,7 +693,7 @@ def create_menu_options():
         ("Indefinite", None, lambda systray: run_callback(systray, 0)),
     )
 
-    menu_options = (
+    menu_options: MenuOptions = (
         ("Pause", None, pause_menu),
         ("Run", None, run_menu),
         ("Resume", None, resume_callback),
@@ -681,7 +703,7 @@ def create_menu_options():
     return menu_options
 
 
-def debug_log(message, filename="caff2_debug.log"):
+def debug_log(message: str, filename: str = "caff2_debug.log"):
     """Write to a debug log file with the specified filename"""
     try:
         log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
@@ -698,7 +720,7 @@ def debug_log(message, filename="caff2_debug.log"):
             pass  # If even this fails, we can't do much more
 
 
-def worker_process(minutes):
+def worker_process(minutes: Optional[int]):
     """Function for the actual background worker process"""
     global stop_flag, systray_icon, refresh_minutes
 
@@ -811,7 +833,7 @@ def main():
         # This block handles worker process execution
         if "--caff2-worker" in sys.argv:
             # Worker process code
-            minutes = read_config()
+            minutes: Optional[int] = read_config()
             if not minutes:
                 debug_log("No minutes configuration found", "caff2_main.log")
                 log_action("No minutes configuration found for worker process")

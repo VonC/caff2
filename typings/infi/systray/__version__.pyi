@@ -1,0 +1,11 @@
+__version__: str
+__git_commiter_name__: str
+__git_commiter_email__: str
+__git_branch__: str
+__git_remote_tracking_branch__: str
+__git_remote_url__: str
+__git_head_hash__: str
+__git_head_subject__: str
+__git_head_message__: str
+__git_dirty_diff__: str
+__git_commit_date__: str
