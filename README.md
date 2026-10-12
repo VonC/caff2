@@ -1,5 +1,58 @@
 # Caff2: Caffeine, but in Python, for Windows
 
+## Quick start
+
+Install **Python 3.10 or newer for Windows**, including pip, and enable
+**Add python.exe to PATH**. Download or clone this repository, open a terminal
+in its folder, and run:
+
+```bat
+.\run.bat
+```
+
+The first run creates `.venv` and installs `requirements.txt`; it needs access
+to a Python package index. Later runs reuse that environment. Global `senv`,
+`switchpy`, Git, and the `batcolors` submodule are not needed to run Caff2.
+Arguments are forwarded to the application, for example `run.bat 5` sets the
+interval to five minutes. Use the tray menu to pause or exit.
+
+To activate the environment for development in Command Prompt, run
+`call .\senv.bat`. To use Python directly after setup:
+
+```bat
+.venv\Scripts\python.exe caff2.py 5
+```
+
+Alternatively, set up Python without either batch script:
+
+```bat
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe caff2.py
+```
+
+Optional private package-index and certificate settings belong in the ignored
+`senv.local.bat`. Existing `PIP_INDEX_URL`, `PIP_EXTRA_INDEX_URL`, and `PIP_CERT`
+settings are respected; the corresponding `UV_*` settings are also supported.
+
+## Maintainer commit protection
+
+When a sibling `../llm-shared` checkout and private replacement rules are
+available, `senv.bat` installs or verifies its composable `pre-commit` and
+`commit-msg` hooks, using **llm-shared's own Python environment**. Existing
+hooks are preserved. This integration is optional for ordinary installations.
+
+Shared rules come from the local Git setting `sensitive.sharedRulesFile`, or
+otherwise `../a.sensitive.replacements.local.txt`. Project rules belong in
+`a.sensitive.replacements.local.txt`. Rules and audit reports are ignored and
+must never be committed. Configured but invalid protection makes setup fail
+with an error. After changing hook configuration, use `fsenv` in Command Prompt
+or start a fresh terminal to run setup again.
+
+These hooks check staged content and the pending commit message. A separate
+history audit is necessary before publishing existing commits. Git's
+`--no-verify` option bypasses these local hooks.
+
 ## Additional features
 
 - Allows clearer input from user for the number of minutes
@@ -10,7 +63,7 @@
 - Employs a robust single-instance mechanism using a lock file to prevent multiple executions.
 - Features improved responsiveness to exit commands, particularly via system tray, due to more frequent checks.
 - Includes comprehensive debug logging for easier troubleshooting.
-- Provides convenient new batch scripts for simpler setup and execution with colored output.
+- Provides batch scripts for setup and execution using standard Python tooling.
 
 ## Evolutions
 
@@ -45,7 +98,7 @@ The recent changes to the `caff2.py` script and the introduction of new utility 
    - The new `run.bat` and `senv.bat` files aim to **streamline the setup and execution process**, especially for Windows users.
    - `senv.bat` helps in **setting up the Python environment**, and potentially a virtual environment, in a standardized way.
    - `run.bat` provides a simple entry point to start the `caff2.py` application.
-   - The integration of the `batcolors` submodule allows for **colored console output** in these batch scripts, making messages (tasks, successes, errors) clearer and more visually appealing for the user.
+   - The batch scripts use plain console output and work without the historical `batcolors` submodule.
    - `run.bat` also specifically handles the "another instance running" error message (errorlevel 2) from `caff2.py` with a user-friendly message.
 
 ## Hard-Forked from [Stay-Awake](https://github.com/ianian-dot/Stay-Awake-2)
@@ -56,16 +109,9 @@ Initially, a small python script to move your mouse, press the shift key, and ke
 PC awake when you're away
 
 Uses command line arguments to set the number of minutes between movements and
-requires Python3 or higher.  
+requires Python 3.10 or newer on Windows.
  Default timer is 3 minutes, but can be 1 or more.
 
 ## Dependencies
 
 This software is using PyAutoGui <https://github.com/asweigart/pyautogui> as the driver behind the movement.
-
-## Optional- Create Virtual Env Step
-
-``` bash
-python3 -m venv ./caff2 ```
-pip install -r requirements.txt ```
-```
