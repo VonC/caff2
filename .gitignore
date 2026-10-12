@@ -2,4 +2,12 @@ caff2_log.txt
 *.log
 *.lock
 a
+a.commit
 
+senv.local.bat
+*.local.*
+.reviews/
+.venv/
+venvs/
+__pycache__/
+*.py[cod]
