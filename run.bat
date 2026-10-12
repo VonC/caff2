@@ -1,42 +1,15 @@
 @echo off
-
-for %%i in ("%~dp0") do SET "run_dir=%%~fi"
-set "run_dir=%run_dir:~0,-1%"
-
-REM ========================================
-REM INITIALIZATION
-REM ========================================
-set "SKIP_LOCAL=1"
-call "%run_dir%\senv.bat"
+setlocal
+call "%~dp0senv.bat"
 if errorlevel 1 (
   echo Unable to set up the environment.
   exit /b 1
 )
-
-%_task% "Must access CAFF project in '%PRJ_DIR%'"
-pushd "%PRJ_DIR%"
-if errorlevel 1 (
-  %_fatal% "Unable to access project directory: '%PRJ_DIR%'" 5
-)
-%_task% "Must run CAFF script in '%PRJ_DIR%'"
-call python caff2.py
-set "err=%errorlevel%"
-if "%err%"=="2" (
-  %_error% "Another instance is already running."
-  goto :eof
-)
-if not "%err%"=="0" (
-  %_fatal% "Unable to run caff2.py" %err%
-)
-%_ok% "CAFF script executed successfully."
+pushd "%~dp0."
+if errorlevel 1 exit /b 5
+"%~dp0.venv\Scripts\python.exe" "%~dp0caff2.py" %*
+set "caff2_exit=%errorlevel%"
 popd
-if errorlevel 1 (
-  %_fatal% "Unable to return to previous directory." 7
-)
-
-
-goto:eof
-
-:call_echos_stack
-if not defined ECHOS_STACK ( set "CURRENT_SCRIPT=%~nx0" & goto:eof ) else ( call "%project_dir%\tools\batcolors\echos.bat" :stack %~nx0 )
-goto:eof
+if "%caff2_exit%"=="2" echo Another instance is already running.
+if not "%caff2_exit%"=="0" if not "%caff2_exit%"=="2" echo Unable to run caff2.py.
+exit /b %caff2_exit%
