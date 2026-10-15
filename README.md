@@ -2,8 +2,9 @@
 
 Caff2 keeps a Windows desktop active with periodic mouse movement and Shift
 presses, controlled from a tray icon. Inspired by
-[Caffeine](https://www.zhornsoftware.co.uk/caffeine/), it helps prevent idle sleep.
-It does not control Windows Update or guarantee prevention of restarts.
+[Caffeine](https://www.zhornsoftware.co.uk/caffeine/), it helps prevent idle sleep
+and unwanted update restarts. Windows Update policies or restart deadlines can
+still require a reboot, but at least not because your computer went idle.
 
 ## Quick install and start
 
