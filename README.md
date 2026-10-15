@@ -10,9 +10,14 @@ still require a reboot, but at least not because your computer went idle.
 
 1. Install [Python 3.10 or newer for Windows](https://www.python.org/downloads/windows/)
    with pip, and enable **Add python.exe to PATH**.
-2. [Download Caff2](https://github.com/VonC/caff2/archive/refs/heads/master.zip)
-   and extract it, or clone this repository. Open PowerShell or Command Prompt
-   in the folder containing `run.bat`.
+2. Install [Git for Windows](https://git-scm.com/downloads/win). Open PowerShell
+   or Command Prompt and clone Caff2, including its `batcolors` submodule:
+
+   ```bat
+   git clone --recurse-submodules https://github.com/VonC/caff2.git
+   cd caff2
+   ```
+
 3. Run:
 
    ```bat
@@ -21,8 +26,11 @@ still require a reboot, but at least not because your computer went idle.
 
 The first run creates a local Python environment and installs dependencies;
 it needs access to a Python package index. Later runs reuse that environment
-and may check dependencies again. No manual package installation or Git is needed
-when using the download.
+and may check dependencies again. No manual Python package installation is needed.
+
+For an existing clone, run `git submodule update --init --recursive` from the
+repository folder. GitHub ZIP downloads omit submodule contents; use the clone
+command above for a complete checkout.
 
 ## Use Caff2
 

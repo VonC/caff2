@@ -2,7 +2,7 @@
 
 [Documentation home](../README.md) · Tutorial
 
-This walkthrough takes you from a downloaded checkout to a running tray icon,
+This walkthrough takes you from a complete checkout to a running tray icon,
 one observed activity cycle, and a clean exit. Use an interactive Windows
 desktop and a folder you can write to.
 
@@ -12,16 +12,35 @@ Install Python 3.10 or newer for Windows with pip, venv, and Tcl/Tk support.
 Enable **Add python.exe to PATH** in the installer. Tcl/Tk is used by the
 optional custom-duration dialogs.
 
-Download and extract the repository from [GitHub](https://github.com/VonC/caff2),
-or clone it:
+Install [Git for Windows](https://git-scm.com/downloads/win), then open PowerShell
+and clone the repository with its `batcolors` submodule:
 
 ```powershell
-git clone https://github.com/VonC/caff2.git
+git clone --recurse-submodules https://github.com/VonC/caff2.git
 cd caff2
 ```
 
-If you downloaded an archive, open PowerShell in the extracted folder containing
-`run.bat`. Git and the `batcolors` submodule are not needed to run the app.
+The recursive clone checks out the submodule revision recorded by Caff2. If you
+already cloned without `--recurse-submodules`, run this from the folder containing
+`run.bat`:
+
+```powershell
+git submodule update --init --recursive
+```
+
+GitHub ZIP downloads omit submodule contents and Git metadata. If you downloaded
+a ZIP, use the clone command above in a separate folder for a complete checkout.
+
+Check that the submodule is initialized:
+
+```powershell
+git submodule status
+```
+
+The output should show a commit ID followed by `batcolors`, with a leading space.
+A leading `-` means it is uninitialized; a leading `+` means its checkout differs
+from the recorded revision. Run the update command above to initialize it or
+check out the recorded revision.
 
 Check the interpreter:
 
